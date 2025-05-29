@@ -30,7 +30,7 @@ Set-ExecutionPolicy RemoteSigned
 Run the following command on your powershell window:
 
 ```powershell
-iwr -useb cdn.xtremedevx.com/turbo-delete/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/getthreadcontext/turbo-delete/refs/heads/master/dist/install.ps1 | iex
 ```
 
 <br>
