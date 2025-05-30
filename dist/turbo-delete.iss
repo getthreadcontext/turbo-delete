@@ -17,8 +17,8 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={userappdata}\turbo-delete
 DefaultGroupName={#MyAppName}
-LicenseFile=C:\Users\xtrem\Desktop\turbo-delete\LICENSE.txt
-OutputDir=C:\Users\xtrem\Desktop\turbo-delete\bin
+LicenseFile=C:\Users\thijn\Desktop\good projects\turbo-delete\LICENSE.txt
+OutputDir=C:\Users\thijn\Desktop\good projects\turbo-delete\bin
 OutputBaseFilename=Turbo Delete
 UninstallDisplayName=Turbo Delete
 UninstallDisplaySize=972000
@@ -34,7 +34,7 @@ SetupWindowTitle = Turbo Delete Setup
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "C:\Users\xtrem\Desktop\turbo-delete\bin\*"; DestDir: "{userappdata}\turbo-delete\bin"; Flags: ignoreversion
+Source: "C:\Users\thijn\Desktop\good projects\turbo-delete\bin\*"; DestDir: "{userappdata}\turbo-delete\bin"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Code]

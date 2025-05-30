@@ -14,63 +14,51 @@
   limitations under the License.
 */
 
-use indicatif::ProgressBar;
-use jwalk::DirEntry;
 use owo_colors::{AnsiColors, OwoColorize};
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
-use rusty_pool::ThreadPool;
 use std::{
-    collections::BTreeMap,
     path::{Path, PathBuf},
     time::Instant,
 };
 
 // change a file to be writable
 pub fn set_writable(path: &Path) {
-    let mut perms = std::fs::metadata(path).unwrap().permissions();
-
-    perms.set_readonly(false);
-
-    std::fs::set_permissions(path, perms).unwrap();
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mut perms = metadata.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
 }
 
-pub fn set_folder_writable(path: &Path) {
-    // get complete list of folders
-    let entries: Vec<DirEntry<((), ())>> = jwalk::WalkDir::new(&path)
-        .follow_links(true)
-        .skip_hidden(false)
-        .into_iter()
-        .filter(|v| {
-            v.as_ref()
-                .unwrap_or_else(|err| {
-                    eprintln!(
-                        "{} {}",
-                        " ERROR ".on_color(AnsiColors::BrightRed).black(),
-                        err
-                    );
-                    std::process::exit(1);
-                })
-                .path()
-                .is_file()
-        })
-        .map(|v| {
-            v.unwrap_or_else(|err| {
-                eprintln!(
-                    "{} {}",
-                    " ERROR ".on_color(AnsiColors::BrightRed).black(),
-                    err
-                );
-                std::process::exit(1);
-            })
-        })
-        .collect::<Vec<DirEntry<((), ())>>>();
-
-    entries.par_iter().for_each(|entry| {
-        set_writable(&entry.path());
-    });
+pub fn force_delete_entry(path: &Path) {
+    if path.is_file() {
+        if std::fs::remove_file(path).is_err() {
+            set_writable(path);
+            let _ = std::fs::remove_file(path);
+        }
+    } else if path.is_dir() {
+        if std::fs::remove_dir_all(path).is_err() {
+            // Try to make writable and delete again
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    set_writable(&entry.path());
+                }
+            }
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
 }
 
 fn main() {
+    // Display Turbo Delete header
+    println!("{}", "╔══════════════════════════════════════╗".bright_cyan());
+    println!("{}", "║        🚀 Turbo Delete v1.0.0        ║".bright_cyan());
+    println!("{}", "║    Fast & Parallel File Deletion    ║".bright_cyan());
+    println!("{}", "╚══════════════════════════════════════╝".bright_cyan());
+    println!();
+
     let start = Instant::now();
 
     let args = std::env::args().collect::<Vec<String>>();
@@ -90,69 +78,81 @@ fn main() {
         })
         .to_string();
 
-    // different methods to test out...
-    // 1. only delete all folders using rm_dir_all
-    // 2. delete folders and files using rm_file
-
-    let mut tree: BTreeMap<u64, Vec<PathBuf>> = BTreeMap::new();
-
     if file_path.ends_with('"') {
         file_path.pop();
     }
 
-    let path = PathBuf::from(&file_path);
+    let path = PathBuf::from(&file_path);    if !path.exists() {
+        println!("{} {}", 
+            " INFO ".on_color(AnsiColors::BrightBlue).white(),
+            "Path does not exist or already deleted.".bright_yellow()
+        );
+        return;
+    }
 
-    // get complete list of folders
-    let entries: Vec<DirEntry<((), ())>> = jwalk::WalkDir::new(&path)
-        .follow_links(true)
+    println!("{} {}", 
+        " TARGET ".on_color(AnsiColors::BrightGreen).black(),
+        format!("Preparing to delete: {}", file_path).bright_white()
+    );
+    
+    println!("{} {}", 
+        " SCAN ".on_color(AnsiColors::BrightYellow).black(),
+        "Scanning directory structure...".bright_white()
+    );
+
+    // Collect all entries first, then delete in parallel
+    let entries: Vec<PathBuf> = jwalk::WalkDir::new(&path)
+        .follow_links(false)
         .skip_hidden(false)
+        .sort(true)
         .into_iter()
         .par_bridge()
-        .filter(|v| v.as_ref().unwrap().path().is_dir())
-        .map(|v| v.unwrap())
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
         .collect();
 
-    let bar = ProgressBar::new(entries.len() as u64);
+    println!("{} {}", 
+        " FOUND ".on_color(AnsiColors::BrightMagenta).white(),
+        format!("Discovered {} items to delete", entries.len()).bright_white()
+    );
+    
+    println!("{} {}", 
+        " DELETE ".on_color(AnsiColors::BrightRed).white(),
+        "Deleting files and directories in parallel...".bright_white()
+    );
 
-    for entry in entries {
-        tree.entry(entry.depth as u64)
-            .or_insert_with(Vec::new)
-            .push(entry.path());
-    }
-
-    let pool = ThreadPool::default();
-
-    let mut handles = vec![];
-
-    for (_, entries) in tree.into_iter().rev() {
-        let bar = bar.clone();
-
-        handles.push(pool.evaluate(move || {
-            entries.par_iter().for_each(|entry| {
-                let _ = std::fs::remove_dir_all(entry);
-
-                bar.inc(1);
-            });
-        }));
-    }
-
-    for handle in handles {
-        handle.await_complete();
-    }
-
+    // Delete all entries in parallel
+    entries.par_iter().for_each(|entry_path| {
+        force_delete_entry(entry_path);
+    });    // Final cleanup - delete the root directory
     if path.exists() {
-        // Try to fix permisssion issues and delete again
-        set_folder_writable(&path);
-
-        std::fs::remove_dir_all(path).unwrap_or_else(|err| {
-            eprintln!(
-                "{} {}",
-                " ERROR ".on_color(AnsiColors::BrightRed).black(),
-                err
-            );
-            std::process::exit(1);
-        });
+        force_delete_entry(&path);
     }
 
-    bar.println(format!("{}", start.elapsed().as_secs_f32()));
+    let elapsed = start.elapsed().as_secs_f32();
+    
+    println!();
+    println!("{} {}", 
+        " SUCCESS ".on_color(AnsiColors::BrightGreen).black(),
+        "Deletion completed successfully!".bright_white()
+    );
+    
+    println!("{} {}", 
+        " TIME ".on_color(AnsiColors::BrightBlue).white(),
+        format!("Completed in {:.3}s", elapsed).bright_white()
+    );
+    
+    if elapsed < 1.0 {
+        println!("{} {}", 
+            " SPEED ".on_color(AnsiColors::BrightCyan).black(),
+            "⚡ Lightning fast deletion!".bright_yellow()
+        );
+    } else if elapsed < 5.0 {
+        println!("{} {}", 
+            " SPEED ".on_color(AnsiColors::BrightCyan).black(),
+            "🚀 Turbo speed achieved!".bright_yellow()
+        );
+    }
+    
+    println!();
 }
+
